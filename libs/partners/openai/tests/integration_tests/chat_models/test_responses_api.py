@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Any, Optional, cast
+from typing import Annotated, Any, Optional, cast
 
 import openai
 import pytest
@@ -11,9 +11,10 @@ from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
     BaseMessageChunk,
+    HumanMessage,
 )
 from pydantic import BaseModel
-from typing_extensions import Annotated, TypedDict
+from typing_extensions import TypedDict
 
 from langchain_openai import ChatOpenAI
 
@@ -47,6 +48,7 @@ def _check_response(response: Optional[BaseMessage]) -> None:
     assert response.usage_metadata["output_tokens"] > 0
     assert response.usage_metadata["total_tokens"] > 0
     assert response.response_metadata["model_name"]
+    assert response.response_metadata["service_tier"]
     for tool_output in response.additional_kwargs["tool_outputs"]:
         assert tool_output["id"]
         assert tool_output["status"]
@@ -270,7 +272,7 @@ def test_function_calling_and_structured_output() -> None:
         """return x * y"""
         return x * y
 
-    llm = ChatOpenAI(model=MODEL_NAME)
+    llm = ChatOpenAI(model=MODEL_NAME, use_responses_api=True)
     bound_llm = llm.bind_tools([multiply], response_format=Foo, strict=True)
     # Test structured output
     response = llm.invoke("how are ya", response_format=Foo)
@@ -348,3 +350,101 @@ def test_file_search() -> None:
         full = chunk if full is None else full + chunk
     assert isinstance(full, AIMessageChunk)
     _check_response(full)
+
+
+def test_stream_reasoning_summary() -> None:
+    reasoning = {"effort": "medium", "summary": "auto"}
+
+    llm = ChatOpenAI(
+        model="o4-mini", use_responses_api=True, model_kwargs={"reasoning": reasoning}
+    )
+    message_1 = {"role": "user", "content": "What is 3^3?"}
+    response_1: Optional[BaseMessageChunk] = None
+    for chunk in llm.stream([message_1]):
+        assert isinstance(chunk, AIMessageChunk)
+        response_1 = chunk if response_1 is None else response_1 + chunk
+    assert isinstance(response_1, AIMessageChunk)
+    reasoning = response_1.additional_kwargs["reasoning"]
+    assert set(reasoning.keys()) == {"id", "type", "summary"}
+    summary = reasoning["summary"]
+    assert isinstance(summary, list)
+    for block in summary:
+        assert isinstance(block, dict)
+        assert isinstance(block["type"], str)
+        assert isinstance(block["text"], str)
+        assert block["text"]
+
+    # Check we can pass back summaries
+    message_2 = {"role": "user", "content": "Thank you."}
+    response_2 = llm.invoke([message_1, response_1, message_2])
+    assert isinstance(response_2, AIMessage)
+
+
+# TODO: VCR some of these
+def test_code_interpreter() -> None:
+    llm = ChatOpenAI(model="o4-mini", use_responses_api=True)
+    llm_with_tools = llm.bind_tools(
+        [{"type": "code_interpreter", "container": {"type": "auto"}}]
+    )
+    response = llm_with_tools.invoke(
+        "Write and run code to answer the question: what is 3^3?"
+    )
+    _check_response(response)
+    tool_outputs = response.additional_kwargs["tool_outputs"]
+    assert tool_outputs
+    assert any(output["type"] == "code_interpreter_call" for output in tool_outputs)
+
+    # Test streaming
+    # Use same container
+    tool_outputs = response.additional_kwargs["tool_outputs"]
+    assert len(tool_outputs) == 1
+    container_id = tool_outputs[0]["container_id"]
+    llm_with_tools = llm.bind_tools(
+        [{"type": "code_interpreter", "container": container_id}]
+    )
+
+    full: Optional[BaseMessageChunk] = None
+    for chunk in llm_with_tools.stream(
+        "Write and run code to answer the question: what is 3^3?"
+    ):
+        assert isinstance(chunk, AIMessageChunk)
+        full = chunk if full is None else full + chunk
+    assert isinstance(full, AIMessageChunk)
+    tool_outputs = full.additional_kwargs["tool_outputs"]
+    assert tool_outputs
+    assert any(output["type"] == "code_interpreter_call" for output in tool_outputs)
+
+
+def test_mcp_builtin() -> None:
+    pytest.skip()  # TODO: set up VCR
+    llm = ChatOpenAI(model="o4-mini", use_responses_api=True)
+
+    llm_with_tools = llm.bind_tools(
+        [
+            {
+                "type": "mcp",
+                "server_label": "deepwiki",
+                "server_url": "https://mcp.deepwiki.com/mcp",
+                "require_approval": {"always": {"tool_names": ["read_wiki_structure"]}},
+            }
+        ]
+    )
+    response = llm_with_tools.invoke(
+        "What transport protocols does the 2025-03-26 version of the MCP spec "
+        "(modelcontextprotocol/modelcontextprotocol) support?"
+    )
+
+    approval_message = HumanMessage(
+        [
+            {
+                "type": "mcp_approval_response",
+                "approve": True,
+                "approval_request_id": output["id"],
+            }
+            for output in response.additional_kwargs["tool_outputs"]
+            if output["type"] == "mcp_approval_request"
+        ]
+    )
+    _ = llm_with_tools.invoke(
+        [approval_message], previous_response_id=response.response_metadata["id"]
+    )

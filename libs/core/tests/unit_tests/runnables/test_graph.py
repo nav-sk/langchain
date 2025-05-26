@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 from packaging import version
 from pydantic import BaseModel
-from syrupy import SnapshotAssertion
+from syrupy.assertion import SnapshotAssertion
 from typing_extensions import override
 
 from langchain_core.language_models import FakeListLLM
@@ -10,7 +10,8 @@ from langchain_core.output_parsers.list import CommaSeparatedListOutputParser
 from langchain_core.output_parsers.string import StrOutputParser
 from langchain_core.output_parsers.xml import XMLOutputParser
 from langchain_core.prompts.prompt import PromptTemplate
-from langchain_core.runnables.base import Runnable, RunnableConfig
+from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.graph import Edge, Graph, Node
 from langchain_core.runnables.graph_mermaid import _escape_node_label
 from langchain_core.utils.pydantic import (
@@ -219,8 +220,8 @@ def test_graph_sequence_map(snapshot: SnapshotAssertion) -> None:
     str_parser = StrOutputParser()
     xml_parser = XMLOutputParser()
 
-    def conditional_str_parser(input: str) -> Runnable:
-        if input == "a":
+    def conditional_str_parser(value: str) -> Runnable:
+        if value == "a":
             return str_parser
         return xml_parser
 

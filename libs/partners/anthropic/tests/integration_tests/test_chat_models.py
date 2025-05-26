@@ -2,7 +2,7 @@
 
 import json
 from base64 import b64encode
-from typing import List, Optional
+from typing import Optional
 
 import httpx
 import pytest
@@ -46,7 +46,7 @@ def test_stream() -> None:
         if token.usage_metadata is not None:
             if token.usage_metadata.get("input_tokens"):
                 chunks_with_input_token_counts += 1
-            elif token.usage_metadata.get("output_tokens"):
+            if token.usage_metadata.get("output_tokens"):
                 chunks_with_output_token_counts += 1
         chunks_with_model_name += int("model_name" in token.response_metadata)
     if chunks_with_input_token_counts != 1 or chunks_with_output_token_counts != 1:
@@ -85,7 +85,7 @@ async def test_astream() -> None:
         if token.usage_metadata is not None:
             if token.usage_metadata.get("input_tokens"):
                 chunks_with_input_token_counts += 1
-            elif token.usage_metadata.get("output_tokens"):
+            if token.usage_metadata.get("output_tokens"):
                 chunks_with_output_token_counts += 1
     if chunks_with_input_token_counts != 1 or chunks_with_output_token_counts != 1:
         raise AssertionError(
@@ -134,6 +134,9 @@ async def test_stream_usage() -> None:
     async for token in model.astream("hi"):
         assert isinstance(token, AIMessageChunk)
         assert token.usage_metadata is None
+
+
+async def test_stream_usage_override() -> None:
     # check we override with kwarg
     model = ChatAnthropic(model_name=MODEL_NAME)  # type: ignore[call-arg]
     assert model.stream_usage
@@ -270,7 +273,7 @@ def test_anthropic_call() -> None:
 def test_anthropic_generate() -> None:
     """Test generate method of anthropic."""
     chat = ChatAnthropic(model=MODEL_NAME)
-    chat_messages: List[List[BaseMessage]] = [
+    chat_messages: list[list[BaseMessage]] = [
         [HumanMessage(content="How many toes do dogs have?")]
     ]
     messages_copy = [messages.copy() for messages in chat_messages]
@@ -318,7 +321,7 @@ async def test_anthropic_async_streaming_callback() -> None:
         callback_manager=callback_manager,
         verbose=True,
     )
-    chat_messages: List[BaseMessage] = [
+    chat_messages: list[BaseMessage] = [
         HumanMessage(content="How many toes do dogs have?")
     ]
     async for token in chat.astream(chat_messages):
@@ -809,7 +812,7 @@ def test_image_tool_calling() -> None:
 
         fav_color: str
 
-    human_content: List[dict] = [
+    human_content: list[dict] = [
         {
             "type": "text",
             "text": "what's your favorite color in this image",

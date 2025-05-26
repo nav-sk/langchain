@@ -249,7 +249,7 @@ def _convert_typed_dict_to_openai_function(typed_dict: type) -> FunctionDescript
         "type[BaseModel]",
         _convert_any_typed_dicts_to_pydantic(typed_dict, visited=visited),
     )
-    return _convert_pydantic_to_openai_function(model)  # type: ignore
+    return _convert_pydantic_to_openai_function(model)
 
 
 _MAX_TYPED_DICT_RECURSION = 25
@@ -313,7 +313,7 @@ def _convert_any_typed_dicts_to_pydantic(
         subscriptable_origin = _py_38_safe_origin(origin)
         type_args = tuple(
             _convert_any_typed_dicts_to_pydantic(arg, depth=depth + 1, visited=visited)
-            for arg in type_args  # type: ignore[index]
+            for arg in type_args
         )
         return subscriptable_origin[type_args]  # type: ignore[index]
     return type_
@@ -554,9 +554,19 @@ def convert_to_openai_tool(
         Return OpenAI Responses API-style tools unchanged. This includes
         any dict with "type" in "file_search", "function", "computer_use_preview",
         "web_search_preview".
+
+    .. versionchanged:: 0.3.61
+
+        Added support for OpenAI's built-in code interpreter and remote MCP tools.
     """
     if isinstance(tool, dict):
-        if tool.get("type") in ("function", "file_search", "computer_use_preview"):
+        if tool.get("type") in (
+            "function",
+            "file_search",
+            "computer_use_preview",
+            "code_interpreter",
+            "mcp",
+        ):
             return tool
         # As of 03.12.25 can be "web_search_preview" or "web_search_preview_2025_03_11"
         if (tool.get("type") or "").startswith("web_search_preview"):
@@ -596,7 +606,7 @@ def convert_to_json_schema(
 
 @beta()
 def tool_example_to_messages(
-    input: str,
+    input: str,  # noqa: A002
     tool_calls: list[BaseModel],
     tool_outputs: Optional[list[str]] = None,
     *,
@@ -621,9 +631,9 @@ def tool_example_to_messages(
 
     Arguments:
         input: string, the user input
-        tool_calls: List[BaseModel], a list of tool calls represented as Pydantic
+        tool_calls: list[BaseModel], a list of tool calls represented as Pydantic
             BaseModels
-        tool_outputs: Optional[List[str]], a list of tool call outputs.
+        tool_outputs: Optional[list[str]], a list of tool call outputs.
             Does not need to be provided. If not provided, a placeholder value
             will be inserted. Defaults to None.
         ai_response: Optional[str], if provided, content for a final AIMessage.
@@ -635,7 +645,7 @@ def tool_example_to_messages(
 
         .. code-block:: python
 
-            from typing import List, Optional
+            from typing import Optional
             from pydantic import BaseModel, Field
             from langchain_openai import ChatOpenAI
 
@@ -691,7 +701,7 @@ def tool_example_to_messages(
         openai_tool_calls
     )
     for output, tool_call_dict in zip(tool_outputs, openai_tool_calls):
-        messages.append(ToolMessage(content=output, tool_call_id=tool_call_dict["id"]))  # type: ignore
+        messages.append(ToolMessage(content=output, tool_call_id=tool_call_dict["id"]))
 
     if ai_response:
         messages.append(AIMessage(content=ai_response))
@@ -788,9 +798,12 @@ def _recursive_set_additional_properties_false(
             schema["additionalProperties"] = False
 
         # Recursively check 'properties' and 'items' if they exist
+        if "anyOf" in schema:
+            for sub_schema in schema["anyOf"]:
+                _recursive_set_additional_properties_false(sub_schema)
         if "properties" in schema:
-            for value in schema["properties"].values():
-                _recursive_set_additional_properties_false(value)
+            for sub_schema in schema["properties"].values():
+                _recursive_set_additional_properties_false(sub_schema)
         if "items" in schema:
             _recursive_set_additional_properties_false(schema["items"])
 
